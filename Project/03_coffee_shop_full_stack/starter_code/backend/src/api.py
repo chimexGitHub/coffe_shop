@@ -5,7 +5,7 @@ import json
 from flask_cors import CORS
 import sys
 
-from .database.models import db_drop_and_create_all, setup_db, Drink
+from .database.models import db_drop_and_create_all, setup_db, Drink, db
 from .auth.auth import AuthError, requires_auth
 
 app = Flask(__name__)
@@ -18,7 +18,7 @@ CORS(app)
 !! NOTE THIS MUST BE UNCOMMENTED ON FIRST RUN
 !! Running this funciton will add one
 '''
-db_drop_and_create_all()
+# db_drop_and_create_all()
 
 # ROUTES
 '''
@@ -29,15 +29,22 @@ db_drop_and_create_all()
     returns status code 200 and json {"success": True, "drinks": drinks} where drinks is the list of drinks
         or appropriate status code indicating reason for failure
 '''
-@app.route('/drinks', methods=["GET"])
-def get_drinks():
-    drinks_db = Drink.query.all()
-    drinks = [drink.short() for drink in drinks_db]
+@app.route('/drinks')
+@requires_auth("get:drinks")
+def get_drinks(payload):
+    try:
+        drinks = Drink.query.order_by(Drink.id).all()
+        formated_drinks = [drink.short() for drink in drinks]
 
-    return jsonify({
-        "success": True,
-        "drinks": drinks
-    }), 200
+        return jsonify({
+            "success": True,
+            "drinks": formated_drinks
+        })
+    except:
+        db.session.rollback()
+        abort(404)
+    finally:
+        db.session.close()
 
 '''
 @TODO implement endpoint
@@ -50,12 +57,22 @@ def get_drinks():
 @app.route('/drinks-detail', methods=["GET"])
 @requires_auth('get:drinks-detail')
 def get_drinks_detail(payload):
-    drinks_db = Drink.query.all()
-    drinks = [drink.long() for drink in drinks_db]
-    return jsonify({
-        "success": True,
-        "drinks": drinks
-    }), 200
+
+    try:
+        drinks = Drink.query.order_by(Drink.id).all()
+        long_format_drinks_detail = [drink.long() for drink in drinks]
+
+        return jsonify({
+            "success": True,
+            "drinks": long_format_drinks_detail
+        })
+
+    except:
+        db.session.rollback()
+        abort(404)
+
+    finally:
+        db.session.close()
 
 '''
 @TODO implement endpoint
@@ -215,6 +232,15 @@ def forbidden(error):
         "error": 403,
         "message": "forbidden"
     }), 403
+
+@app.errorhandler(405)
+def method_not_allowed(error):
+    return jsonify({
+        "success": False,
+        "error": 405,
+        "message": "method not allowed"
+    }), 405
+
 '''
 @TODO implement error handler for 404
     error handler should conform to general task above
@@ -228,15 +254,25 @@ def not_found(error):
         "message": "resource not found"
     }), 404
 
-'''
-@TODO implement error handler for AuthError
-    error handler should conform to general task above
-'''
-# error handler for Internal server error (500)
+#errorhandler for internal server error (500)
 @app.errorhandler(500)
 def internal_server_error(error):
+    print({"error": error})
     return jsonify({
         "success": False,
         "error": 500,
         "message": "Internal server error"
     }), 500
+
+'''
+@TODO implement error handler for AuthError
+    error handler should conform to general task above
+'''
+# error handler for AuthError
+@app.errorhandler(AuthError)
+def internal_auth_error(auth_error):
+    return jsonify({
+        "success": False,
+        "error": auth_error.status_code,
+        "message": auth_error.error['description']
+    }), auth_error.status_code
